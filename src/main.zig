@@ -21,60 +21,48 @@ pub const Token = union(enum) {
 pub const Template = struct {
     const Self = @This();
 
-    tokens: ?[]Token = undefined,
+    tokens: []const Token = undefined,
     text: []const u8 = undefined,
 
     alloc: std.mem.Allocator,
-
     /// init initializes a template
     pub fn init(alloc: std.mem.Allocator) Self {
         return .{ .alloc = alloc };
     }
 
-    pub fn deinit(self: *Self) void {
-        if (self.tokens) |toks| self.alloc.free(toks);
-    }
-
     /// parse a file into a token stream & ref to source
-    pub fn parse(self: *Self, input: []const u8) !void {
-        if (self.tokens) |toks| self.alloc.free(toks);
-
+    pub fn parse(comptime self: *Self, comptime input: []const u8) !void {
+        self.tokens = &.{};
         self.text = input;
-        try self.tokenize();
-    }
 
-    /// tokenise turns a file into a sequence of tokens
-    fn tokenize(self: *Self) !void {
-        var tok_list = std.ArrayList(Token).init(self.alloc);
+        comptime {
+            var i: usize = 0;
+            while (i < self.text.len) : (i += 1) {
+                const tok: ?Token = switch (self.text[i]) {
+                    '{' => if (self.text.len > i + 1 and self.text[i + 1] == '{') Token{ .open_bra = i } else null,
+                    '}' => if (self.text.len > i + 1 and self.text[i + 1] == '}') Token{ .close_bra = i + 2 } else null, // see Token.close_bra
+                    '.' => switch (self.tokens[self.tokens.len - 1]) {
+                        Token.open_bra => x: {
+                            i += 1; // skip the dot
 
-        var i: usize = 0;
-        while (i < self.text.len) : (i += 1) {
-            const tok: ?Token = switch (self.text[i]) {
-                '{' => if (self.text.len > i + 1 and self.text[i + 1] == '{') Token{ .open_bra = i } else null,
-                '}' => if (self.text.len > i + 1 and self.text[i + 1] == '}') Token{ .close_bra = i + 2 } else null, // see Token.close_bra
-                '.' => switch (tok_list.items[tok_list.items.len - 1]) {
-                    Token.open_bra => x: {
-                        i += 1; // skip the dot
+                            while (i < self.text.len and self.text[i] == ' ') : (i += 1) {} // eat whitespace
 
-                        while (i < self.text.len and self.text[i] == ' ') : (i += 1) {} // eat whitespace
+                            const ident_start = i;
+                            while (i < self.text.len and
+                                self.text[i] != '}' and
+                                self.text[i] != ' ') : (i += 1)
+                            {} // eat until closing brace
 
-                        const ident_start = i;
-                        while (i < self.text.len and
-                            self.text[i] != '}' and
-                            self.text[i] != ' ') : (i += 1)
-                        {} // eat until closing brace
-
-                        break :x if (ident_start == i) null else Token{ .ident = .{ .start = ident_start, .end = i } };
+                            break :x if (ident_start == i) null else Token{ .ident = .{ .start = ident_start, .end = i } };
+                        },
+                        else => null,
                     },
                     else => null,
-                },
-                else => null,
-            };
+                };
 
-            if (tok) |t| try tok_list.append(t);
+                if (tok) |t| self.tokens = self.tokens ++ [_]Token{t};
+            }
         }
-
-        self.tokens = tok_list.toOwnedSlice();
     }
 
     /// render renders a template
@@ -89,7 +77,7 @@ pub const Template = struct {
         defer to_insert.deinit();
 
         var next_insert: insert_in = .{};
-        for (self.tokens.?) |tok| {
+        for (self.tokens) |tok| {
             switch (tok) {
                 Token.open_bra => next_insert.start = tok.open_bra,
                 Token.close_bra => next_insert.end = tok.close_bra,
@@ -117,10 +105,6 @@ pub const Template = struct {
 };
 
 test "render" {
-    std.testing.log_level = std.log.Level.debug;
-    var t = Template.init(std.testing.allocator);
-    defer t.deinit();
-
     // output
     var out = std.ArrayList(u8).init(std.testing.allocator);
     defer out.deinit();
@@ -133,6 +117,8 @@ test "render" {
     try in.put("foo", &.{bar[0..]});
 
     {
+        comptime var t = Template.init(std.testing.allocator);
+
         defer out.clearRetainingCapacity();
         try t.parse("{{ .foo }}");
         try t.render(out.writer(), in);
@@ -140,6 +126,8 @@ test "render" {
         try expect_string("single ident replace", "bar123", out.items);
     }
     {
+        comptime var t = Template.init(std.testing.allocator);
+
         defer out.clearRetainingCapacity();
         try t.parse(" {{ .foo }} {{ .bar }} ");
         try t.render(out.writer(), in);
@@ -147,6 +135,8 @@ test "render" {
         try expect_string("multiple ident replace with leading and trailing whitespace", " bar123  ", out.items);
     }
     {
+        comptime var t = Template.init(std.testing.allocator);
+
         defer out.clearRetainingCapacity();
         try t.parse("{{ .foo }} foo between the bars {{ .foo }}");
         try t.render(out.writer(), in);
@@ -160,36 +150,36 @@ test "render" {
 }
 
 test "parse idents" {
-    var t = Template.init(std.testing.allocator);
-    defer t.deinit();
+    comptime var t = Template.init(std.testing.allocator);
 
     // none
     try t.parse("");
-    try testing.expect(t.tokens.?.len == 0);
+    try testing.expect(t.tokens.len == 0);
 
     // basic
     try t.parse(" {{ .foo }} not inside");
-    try testing.expect(t.tokens.?.len == 3);
-    try testing.expectEqual(Token{ .open_bra = 1 }, t.tokens.?[0]);
-    try testing.expectEqual(Token{ .ident = .{ .start = 5, .end = 8 } }, t.tokens.?[1]);
-    try testing.expectEqual(Token{ .close_bra = 11 }, t.tokens.?[2]);
+    try testing.expect(t.tokens.len == 3);
+
+    try testing.expectEqual(Token{ .open_bra = 1 }, t.tokens[0]);
+    try testing.expectEqual(Token{ .ident = .{ .start = 5, .end = 8 } }, t.tokens[1]);
+    try testing.expectEqual(Token{ .close_bra = 11 }, t.tokens[2]);
 
     // nested
     try t.parse("{{ .foo.bar }}");
-    try testing.expect(t.tokens.?.len == 3);
-    try testing.expectEqual(Token{ .open_bra = 0 }, t.tokens.?[0]);
-    try testing.expectEqual(Token{ .ident = .{ .start = 4, .end = 11 } }, t.tokens.?[1]);
-    try testing.expectEqual(Token{ .close_bra = 14 }, t.tokens.?[2]);
+    try testing.expect(t.tokens.len == 3);
+    try testing.expectEqual(Token{ .open_bra = 0 }, t.tokens[0]);
+    try testing.expectEqual(Token{ .ident = .{ .start = 4, .end = 11 } }, t.tokens[1]);
+    try testing.expectEqual(Token{ .close_bra = 14 }, t.tokens[2]);
 
     // multiple
     try t.parse("{{ .foo }} {{ .bar }}");
-    try testing.expect(t.tokens.?.len == 6);
-    try testing.expectEqual(Token{ .open_bra = 0 }, t.tokens.?[0]);
-    try testing.expectEqual(Token{ .ident = .{ .start = 4, .end = 7 } }, t.tokens.?[1]);
-    try testing.expectEqual(Token{ .close_bra = 10 }, t.tokens.?[2]);
-    try testing.expectEqual(Token{ .open_bra = 11 }, t.tokens.?[3]);
-    try testing.expectEqual(Token{ .ident = .{ .start = 15, .end = 18 } }, t.tokens.?[4]);
-    try testing.expectEqual(Token{ .close_bra = 21 }, t.tokens.?[5]);
+    try testing.expect(t.tokens.len == 6);
+    try testing.expectEqual(Token{ .open_bra = 0 }, t.tokens[0]);
+    try testing.expectEqual(Token{ .ident = .{ .start = 4, .end = 7 } }, t.tokens[1]);
+    try testing.expectEqual(Token{ .close_bra = 10 }, t.tokens[2]);
+    try testing.expectEqual(Token{ .open_bra = 11 }, t.tokens[3]);
+    try testing.expectEqual(Token{ .ident = .{ .start = 15, .end = 18 } }, t.tokens[4]);
+    try testing.expectEqual(Token{ .close_bra = 21 }, t.tokens[5]);
 }
 
 /// expect_string is a helper function for testing
