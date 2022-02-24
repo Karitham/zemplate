@@ -24,14 +24,9 @@ pub const Template = struct {
     tokens: []const Token = undefined,
     text: []const u8 = undefined,
 
-    alloc: std.mem.Allocator,
-    /// init initializes a template
-    pub fn init(alloc: std.mem.Allocator) Self {
-        return .{ .alloc = alloc };
-    }
-
-    /// parse a file into a token stream & ref to source
-    pub fn parse(comptime self: *Self, comptime input: []const u8) !void {
+    /// tokenize a file into a token stream & ref to source
+    pub fn parse(comptime input: []const u8) !Self {
+        var self = Self{};
         self.tokens = &.{};
         self.text = input;
 
@@ -63,41 +58,52 @@ pub const Template = struct {
                 if (tok) |t| self.tokens = self.tokens ++ [_]Token{t};
             }
         }
+        return self;
     }
 
-    /// render renders a template
-    pub fn render(self: *Self, writer: anytype, args: std.StringHashMap([][]const u8)) !void {
-        const insert_in = struct {
-            tag: ?[]const u8 = undefined,
-            start: ?usize = undefined,
-            end: ?usize = undefined,
-        };
+    const PositionalTok = struct {
+        tag: ?[]const u8 = null,
+        start: ?usize = null,
+        end: ?usize = null,
+    };
 
-        var to_insert = std.ArrayList(insert_in).init(self.alloc);
-        defer to_insert.deinit();
+    fn parse_positional_tok(comptime self: *Self) ![]const PositionalTok {
+        comptime var to_insert: []const PositionalTok = &.{};
+        comptime {
+            var next_insert: PositionalTok = .{};
+            for (self.tokens) |tok| {
+                switch (tok) {
+                    Token.open_bra => next_insert.start = tok.open_bra,
+                    Token.close_bra => next_insert.end = tok.close_bra,
+                    Token.ident => next_insert.tag = self.text[tok.ident.start..tok.ident.end],
+                }
 
-        var next_insert: insert_in = .{};
-        for (self.tokens) |tok| {
-            switch (tok) {
-                Token.open_bra => next_insert.start = tok.open_bra,
-                Token.close_bra => next_insert.end = tok.close_bra,
-                Token.ident => next_insert.tag = self.text[tok.ident.start..tok.ident.end],
-            }
-
-            if (next_insert.start != null and next_insert.end != null and next_insert.tag != null) {
-                try to_insert.append(next_insert);
-                next_insert = .{};
+                if (next_insert.start != null and next_insert.end != null and next_insert.tag != null) {
+                    to_insert = to_insert ++ [_]PositionalTok{next_insert};
+                    next_insert = .{};
+                }
             }
         }
 
+        return to_insert;
+    }
+
+    /// render renders a template
+    pub fn render(comptime self: *Self, writer: anytype, comptime args: anytype) !void {
+        const t = @typeInfo(@TypeOf(args));
+        if (t != .Struct) @compileError("args must be a struct or union");
+        comptime var to_insert = try self.parse_positional_tok();
+
         var last_off: usize = 0;
         // basic ident replacement
-        for (to_insert.items) |ins| {
+        inline for (to_insert) |ins| {
             try writer.writeAll(self.text[last_off..ins.start.?]);
             last_off = ins.end.?;
 
-            if (args.get(ins.tag.?)) |val| {
-                if (val.len > 0) try writer.writeAll(val[0][0..val[0].len]);
+            inline for (t.Struct.fields) |f| {
+                if (std.mem.eql(u8, f.name, ins.tag.?)) {
+                    try writer.writeAll(@field(args, f.name));
+                }
             }
         }
         try writer.writeAll(self.text[last_off..self.text.len]);
@@ -110,36 +116,25 @@ test "render" {
     defer out.deinit();
 
     // values
-    var in = std.StringHashMap([][]const u8).init(std.testing.allocator);
-    defer in.deinit();
-
-    var bar = "bar123";
-    try in.put("foo", &.{bar[0..]});
-
     {
-        comptime var t = Template.init(std.testing.allocator);
-
         defer out.clearRetainingCapacity();
-        try t.parse("{{ .foo }}");
-        try t.render(out.writer(), in);
+        comptime var t = try Template.parse("{{ .foo }}");
+        try t.render(out.writer(), .{ .foo = "bar123" });
 
         try expect_string("single ident replace", "bar123", out.items);
     }
     {
-        comptime var t = Template.init(std.testing.allocator);
-
         defer out.clearRetainingCapacity();
-        try t.parse(" {{ .foo }} {{ .bar }} ");
-        try t.render(out.writer(), in);
+        comptime var t = try Template.parse(" {{ .foo }} {{ .bar }} ");
+
+        try t.render(out.writer(), .{ .foo = "bar123" });
 
         try expect_string("multiple ident replace with leading and trailing whitespace", " bar123  ", out.items);
     }
     {
-        comptime var t = Template.init(std.testing.allocator);
-
         defer out.clearRetainingCapacity();
-        try t.parse("{{ .foo }} foo between the bars {{ .foo }}");
-        try t.render(out.writer(), in);
+        comptime var t = try Template.parse("{{ .foo }} foo between the bars {{ .foo }}");
+        try t.render(out.writer(), .{ .foo = "bar123" });
 
         try expect_string(
             "single ident with other text appearing multiple times",
@@ -150,36 +145,34 @@ test "render" {
 }
 
 test "parse idents" {
-    comptime var t = Template.init(std.testing.allocator);
 
     // none
-    try t.parse("");
-    try testing.expect(t.tokens.len == 0);
+    comptime var t1 = try Template.parse("");
+    try testing.expect(t1.tokens.len == 0);
 
     // basic
-    try t.parse(" {{ .foo }} not inside");
-    try testing.expect(t.tokens.len == 3);
-
-    try testing.expectEqual(Token{ .open_bra = 1 }, t.tokens[0]);
-    try testing.expectEqual(Token{ .ident = .{ .start = 5, .end = 8 } }, t.tokens[1]);
-    try testing.expectEqual(Token{ .close_bra = 11 }, t.tokens[2]);
+    comptime var t2 = try Template.parse(" {{ .foo }} not inside");
+    try testing.expect(t2.tokens.len == 3);
+    try testing.expectEqual(Token{ .open_bra = 1 }, t2.tokens[0]);
+    try testing.expectEqual(Token{ .ident = .{ .start = 5, .end = 8 } }, t2.tokens[1]);
+    try testing.expectEqual(Token{ .close_bra = 11 }, t2.tokens[2]);
 
     // nested
-    try t.parse("{{ .foo.bar }}");
-    try testing.expect(t.tokens.len == 3);
-    try testing.expectEqual(Token{ .open_bra = 0 }, t.tokens[0]);
-    try testing.expectEqual(Token{ .ident = .{ .start = 4, .end = 11 } }, t.tokens[1]);
-    try testing.expectEqual(Token{ .close_bra = 14 }, t.tokens[2]);
+    comptime var t3 = try Template.parse("{{ .foo.bar }}");
+    try testing.expect(t3.tokens.len == 3);
+    try testing.expectEqual(Token{ .open_bra = 0 }, t3.tokens[0]);
+    try testing.expectEqual(Token{ .ident = .{ .start = 4, .end = 11 } }, t3.tokens[1]);
+    try testing.expectEqual(Token{ .close_bra = 14 }, t3.tokens[2]);
 
     // multiple
-    try t.parse("{{ .foo }} {{ .bar }}");
-    try testing.expect(t.tokens.len == 6);
-    try testing.expectEqual(Token{ .open_bra = 0 }, t.tokens[0]);
-    try testing.expectEqual(Token{ .ident = .{ .start = 4, .end = 7 } }, t.tokens[1]);
-    try testing.expectEqual(Token{ .close_bra = 10 }, t.tokens[2]);
-    try testing.expectEqual(Token{ .open_bra = 11 }, t.tokens[3]);
-    try testing.expectEqual(Token{ .ident = .{ .start = 15, .end = 18 } }, t.tokens[4]);
-    try testing.expectEqual(Token{ .close_bra = 21 }, t.tokens[5]);
+    comptime var t4 = try Template.parse("{{ .foo }} {{ .bar }}");
+    try testing.expect(t4.tokens.len == 6);
+    try testing.expectEqual(Token{ .open_bra = 0 }, t4.tokens[0]);
+    try testing.expectEqual(Token{ .ident = .{ .start = 4, .end = 7 } }, t4.tokens[1]);
+    try testing.expectEqual(Token{ .close_bra = 10 }, t4.tokens[2]);
+    try testing.expectEqual(Token{ .open_bra = 11 }, t4.tokens[3]);
+    try testing.expectEqual(Token{ .ident = .{ .start = 15, .end = 18 } }, t4.tokens[4]);
+    try testing.expectEqual(Token{ .close_bra = 21 }, t4.tokens[5]);
 }
 
 /// expect_string is a helper function for testing
