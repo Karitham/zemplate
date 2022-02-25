@@ -29,14 +29,15 @@ pub const Template = struct {
                 parser.Decl.ident => {
                     const ident = ins.ident;
 
-                    try writer.writeAll(self.text[last_off..ident.start.?]);
-                    last_off = ident.end.?;
+                    try writer.writeAll(self.text[last_off..ident.start]);
+                    last_off = ident.end;
                     inline for (t.Struct.fields) |f| {
                         if (std.mem.eql(u8, f.name, ident.tag.?)) {
                             try writer.writeAll(@field(args, f.name));
                         }
                     }
                 },
+                else => {},
             }
         }
         try writer.writeAll(self.text[last_off..self.text.len]);
