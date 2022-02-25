@@ -8,44 +8,80 @@ const testing = std.testing;
 pub const Template = struct {
     const Self = @This();
 
-    blocks: []const parser.Decl = &.{},
+    decls: []const parser.Decl = &.{},
     text: []const u8 = &.{},
 
     pub fn new(comptime input: []const u8) !Self {
         var self = Self{};
         self.text = input;
-        self.blocks = try parser.new(input).parse();
+        comptime {
+            self.decls = try parser.new(input).parse();
+        }
         return self;
     }
+
     /// render renders a template
     pub fn render(comptime self: *Self, writer: anytype, comptime args: anytype) !void {
+        var last_off: usize = 0;
+
+        var i: usize = 0;
+        while (i < self.decls.len) : (i += 1) {
+            try render_decl(writer, args, self.decls[i], &last_off, self.text);
+        }
+
+        try writer.writeAll(self.text[last_off..]);
+    }
+
+    fn render_decl(writer: anytype, comptime args: anytype, decl: parser.Decl, last_off: *usize, text: []const u8) !void {
         const t = @typeInfo(@TypeOf(args));
         if (t != .Struct) @compileError("args must be a struct or union");
 
-        var last_off: usize = 0;
-        // basic ident replacement
-        inline for (self.blocks) |ins| {
-            switch (ins) {
-                parser.Decl.ident => {
-                    const ident = ins.ident;
+        switch (decl) {
+            parser.Decl.ident => {
+                const ident = decl.ident;
 
-                    try writer.writeAll(self.text[last_off..ident.start]);
-                    last_off = ident.end;
-                    inline for (t.Struct.fields) |f| {
-                        if (std.mem.eql(u8, f.name, ident.tag.?)) {
-                            try writer.writeAll(@field(args, f.name));
-                        }
+                try writer.writeAll(text[last_off.*..decl.start_or(text.len)]);
+                inline for (t.Struct.fields) |f| {
+                    if (std.mem.eql(u8, f.name, ident.tag.?)) {
+                        try writer.writeAll(@field(args, f.name));
+                        break;
                     }
-                },
-                else => {},
-            }
+                }
+                last_off.* = ident.end;
+
+                try writer.writeAll(text[last_off.*..decl.end_or(text.len)]);
+            },
+            else => {
+                _ = text;
+            },
         }
-        try writer.writeAll(self.text[last_off..self.text.len]);
     }
 };
 
 test "parsing" {
     _ = @import("parser.zig");
+}
+
+test "render range" {
+    var out = std.ArrayList(u8).init(std.testing.allocator);
+    defer out.deinit();
+
+    comptime var t = try Template.new("{{range .foo }}{{ .bar }}{{end}}");
+    try testing.expectEqual(1, t.decls.len);
+    try utils.expect_string("expect foo", "foo", t.decls[0].decls[0].range.tag.?);
+    try testing.expectEqual(0, t.decls[0].decls[0].range.start);
+    try testing.expectEqual(15, t.decls[0].decls[0].range.end);
+
+    try utils.expect_string("expect bar", "bar", t.decls[0].decls[1].ident.tag.?);
+    try testing.expectEqual(15, t.decls[0].decls[1].ident.start);
+    try testing.expectEqual(25, t.decls[0].decls[1].ident.end);
+
+    try testing.expect(null == t.decls[0].decls[2].end.tag);
+    try testing.expectEqual(25, t.decls[0].decls[2].end.start);
+    try testing.expectEqual(32, t.decls[0].decls[2].end.end);
+
+    // try t.render(out.writer(), .{ .foo = &.{ .{ .bar = "hello " }, .{ .bar = "world" } } });
+    // try utils.expect_string("render range", "hello world", out.items);
 }
 
 test "render idents" {
@@ -60,11 +96,11 @@ test "render idents" {
     }
     {
         defer out.clearRetainingCapacity();
-        comptime var t = try Template.new(" {{ .foo }} {{ .bar }} ");
-        try t.render(out.writer(), .{ .foo = "bar123" });
+        comptime var t = try Template.new(" {{ .foo }} {{ .bar }} {{ .foo }} ");
+        try t.render(out.writer(), .{ .bar = "bar123" });
         try utils.expect_string(
             "multiple ident replace with leading and trailing whitespace",
-            " bar123  ",
+            "  bar123  ",
             out.items,
         );
     }
