@@ -1,10 +1,10 @@
 const std = @import("std");
 const testing = std.testing;
 
-/// expect_string is a helper function for testing
-pub fn expect_string(name: ?[]const u8, expected: []const u8, actual: []const u8) !void {
+/// is a helper function for testing
+pub fn expectString(expected: []const u8, actual: []const u8) !void {
     testing.expect(std.mem.eql(u8, expected, actual)) catch |err| {
-        std.log.err("{s}: expected: \'{s}\', got: \'{s}\'", .{ name, expected, actual });
+        std.log.err("expected: \'{s}\', got: \'{s}\'", .{ expected, actual });
         return err;
     };
 }
@@ -27,7 +27,7 @@ pub fn Tuple(comptime T0: type, comptime T1: type) type {
             if (comptime @typeInfo(@TypeOf(vars[1])) != .Null) vars[1].* = self.@"1";
         }
 
-        pub fn set(self: *@This(), comptime index: usize, value: type) void {
+        pub fn set(self: *@This(), comptime index: usize, value: anytype) void {
             comptime {
                 if (@TypeOf(value) != types[index]) {
                     @compileLog("Invalid type for index" ++ index ++ ":" ++ @typeName(@TypeOf(value)));
@@ -52,4 +52,25 @@ pub fn Tuple(comptime T0: type, comptime T1: type) type {
             };
         }
     };
+}
+
+const FieldError = error{
+    FieldNotFound,
+};
+
+/// returns a field with the specified name
+pub fn getField(comptime T: type, comptime args: anytype, name: []const u8) !T {
+    for (name) |c, i| if (c == '.') return getField(T, @field(args, name[0..i]), name[i + 1 ..]);
+    return @field(args, name);
+}
+
+test "parse tag" {
+    var t = comptime try getField([]const u8, .{ .foo = "bar" }, "foo");
+    try testing.expectEqual(t, "bar");
+
+    t = comptime try getField([]const u8, .{ .foo = .{ .bar = "baz" } }, "foo.bar");
+    try testing.expectEqual(t, "baz");
+
+    var t2 = comptime try getField([]const []const u8, .{ .foo = &.{ "bar", "baz" } }, "foo");
+    try testing.expectEqualSlices([]const u8, t2, &.{ "bar", "baz" });
 }

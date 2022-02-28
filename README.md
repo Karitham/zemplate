@@ -2,8 +2,40 @@
 
 Zemplate is a *WIP* zig templating engine.
 
-The syntax is inspired by html/template from go, but is farm from complete.
+The syntax is inspired by text/template from go.
 
-I'm still looking for a way to make the argument passing more flexible to render, such that we can insert any kind of data into the template.
+## Examples
+
+### Identifiers
+
+```txt
+{{.foo}}
+```
+
+Pulls `foo` from struct and inserts it into the template.
+
+if `foo` is `{ "foo": "bar" }` the output would be
+
+```txt
+bar
+```
+
+### Ranges
+
+```txt
+{{ range .foo }}- {{ .bar }}
+{{ end }}
+```
+
+if `foo` is `{"foo": [{ "bar": "a" }, { "bar": "b" }, { "bar": "c" }]}` then the output would be
+
+```txt
+- a
+- b
+- c
+
+```
+
+## Notes
 
 I'm open to any and all contributions, be it from code-review, documentation or any form of critique, especially since this is my first zig project.

@@ -101,9 +101,9 @@ pub const Parser = struct {
 
                     return switch (toks[i]) {
                         Token.close_brace => Tupl.init(null, 2), // empty block
-                        Token.ident => Decl.parse_ident(toks, text),
-                        Token.range_keyword => Decl.parse_range(toks, text),
-                        Token.end_keyword => Decl.parse_end(toks),
+                        Token.ident => Decl.parseIdent(toks, text),
+                        Token.range_keyword => Decl.parseRange(toks, text),
+                        Token.end_keyword => Decl.parseEnd(toks),
                         else => Error.expected_ident,
                     };
                 },
@@ -112,8 +112,8 @@ pub const Parser = struct {
             return Error.expected_open_bracece;
         }
 
-        /// parse_ident parses an identifier
-        fn parse_ident(toks: []const Token, text: []const u8) !Tupl {
+        /// parses an identifier
+        fn parseIdent(toks: []const Token, text: []const u8) !Tupl {
             if (toks.len < 3) return Error.expected_ident;
             if (toks[0] != Token.open_brace) return Error.expected_ident;
             if (toks[1] != Token.ident) return Error.expected_ident;
@@ -130,8 +130,8 @@ pub const Parser = struct {
             return Tupl.init(i, 3);
         }
 
-        /// parse_end_keyword parses the end_keyword keyword with its braces
-        fn parse_end(toks: []const Token) !Tupl {
+        /// parses the end_keyword keyword with its braces
+        fn parseEnd(toks: []const Token) !Tupl {
             if (toks.len < 3) return Error.expected_end_keyword;
             if (toks[0] != Token.open_brace) return Error.expected_end_keyword;
             if (toks[1] != Token.end_keyword) return Error.expected_end_keyword;
@@ -140,8 +140,8 @@ pub const Parser = struct {
             return Tupl.init(Decl{ .end = .{ .start = toks[0].open_brace, .end = toks[2].close_brace } }, 3);
         }
 
-        /// parse_range_keyword parses a range_keyword
-        fn parse_range(comptime toks: []const Token, text: []const u8) !Tupl {
+        /// parses a range_keyword
+        fn parseRange(comptime toks: []const Token, text: []const u8) !Tupl {
             if (toks.len < 3) return Error.expected_range_keyword;
             if (toks[0] != Token.open_brace) return Error.open_brace;
             if (toks[1] != Token.range_keyword) return Error.expected_range_keyword;
@@ -175,7 +175,7 @@ pub const Parser = struct {
         }
 
         /// get_start is a helper function that returns the start of any block
-        pub fn start_or(self: Decl, or_: usize) usize {
+        pub fn startOr(self: Decl, or_: usize) usize {
             return switch (self) {
                 Decl.end => self.end.start,
                 Decl.range => self.range.start,
@@ -185,7 +185,7 @@ pub const Parser = struct {
         }
 
         /// get_end is a helper function that returns the end of any block
-        pub fn end_or(self: Decl, or_: usize) usize {
+        pub fn endOr(self: Decl, or_: usize) usize {
             return switch (self) {
                 Decl.end => self.end.end,
                 Decl.range => self.range.end,
@@ -247,10 +247,10 @@ test "parse range" {
     comptime var decls = try Parser.new("{{ range .foo }} {{ .bar }} {{ end }}").parse();
     const range_decl = decls[0];
     try testing.expectEqual(decls.len, 1);
-    try utils.expect_string("expect foo", "foo", range_decl.decls[0].range.tag.?);
+    try utils.expectString("foo", range_decl.decls[0].range.tag.?);
     try testing.expectEqual(0, range_decl.decls[0].range.start);
     try testing.expectEqual(16, range_decl.decls[0].range.end);
-    try utils.expect_string("expect bar", "bar", range_decl.decls[1].ident.tag.?);
+    try utils.expectString("bar", range_decl.decls[1].ident.tag.?);
     try testing.expectEqual(17, range_decl.decls[1].ident.start);
     try testing.expectEqual(27, range_decl.decls[1].ident.end);
     try testing.expectEqual(28, range_decl.decls[2].end.start);
@@ -258,28 +258,28 @@ test "parse range" {
 
     comptime decls = try Parser.new("{{ range .foo }} {{ .bar }} {{ end }} {{ .baz }}").parse();
     try testing.expectEqual(decls.len, 2);
-    try utils.expect_string("expect foo", "foo", decls[0].decls[0].range.tag.?);
+    try utils.expectString("foo", decls[0].decls[0].range.tag.?);
     try testing.expectEqual(0, decls[0].decls[0].range.start);
     try testing.expectEqual(16, decls[0].decls[0].range.end);
-    try utils.expect_string("expect bar", "bar", decls[0].decls[1].ident.tag.?);
+    try utils.expectString("bar", decls[0].decls[1].ident.tag.?);
     try testing.expectEqual(17, decls[0].decls[1].ident.start);
     try testing.expectEqual(27, decls[0].decls[1].ident.end);
     try testing.expectEqual(28, decls[0].decls[2].end.start);
     try testing.expectEqual(37, decls[0].decls[2].end.end);
-    try utils.expect_string("expect baz", "baz", decls[1].ident.tag.?);
+    try utils.expectString("baz", decls[1].ident.tag.?);
     try testing.expectEqual(38, decls[1].ident.start);
     try testing.expectEqual(48, decls[1].ident.end);
 
     // recursive
     comptime decls = try Parser.new("{{ range .foo }} {{ range .bar }} {{ .baz }} {{ end }} {{ end }}").parse();
     try testing.expectEqual(decls.len, 1);
-    try utils.expect_string("expect foo", "foo", decls[0].decls[0].range.tag.?);
+    try utils.expectString("foo", decls[0].decls[0].range.tag.?);
     try testing.expectEqual(0, decls[0].decls[0].range.start);
     try testing.expectEqual(16, decls[0].decls[0].range.end);
-    try utils.expect_string("expect bar", "bar", decls[0].decls[1].decls[0].range.tag.?);
+    try utils.expectString("bar", decls[0].decls[1].decls[0].range.tag.?);
     try testing.expectEqual(17, decls[0].decls[1].decls[0].range.start);
     try testing.expectEqual(33, decls[0].decls[1].decls[0].range.end);
-    try utils.expect_string("expect baz", "baz", decls[0].decls[1].decls[1].ident.tag.?);
+    try utils.expectString("baz", decls[0].decls[1].decls[1].ident.tag.?);
     try testing.expectEqual(34, decls[0].decls[1].decls[1].ident.start);
     try testing.expectEqual(44, decls[0].decls[1].decls[1].ident.end);
     try testing.expectEqual(45, decls[0].decls[1].decls[2].end.start);
@@ -300,16 +300,16 @@ test "parse idents" {
 
     comptime decls = try Parser.new("{{ .foo }}").parse();
     try testing.expectEqual(1, decls.len);
-    try utils.expect_string("expect foo", "foo", decls[0].ident.tag.?);
+    try utils.expectString("foo", decls[0].ident.tag.?);
     try testing.expectEqual(0, decls[0].ident.start);
     try testing.expectEqual(10, decls[0].ident.end);
 
     comptime decls = try Parser.new("{{ .foo }} {{ .bar }}").parse();
     try testing.expectEqual(2, decls.len);
-    try utils.expect_string("expect foo", "foo", decls[0].ident.tag.?);
+    try utils.expectString("foo", decls[0].ident.tag.?);
     try testing.expectEqual(0, decls[0].ident.start);
     try testing.expectEqual(10, decls[0].ident.end);
-    try utils.expect_string("expect bar", "bar", decls[1].ident.tag.?);
+    try utils.expectString("bar", decls[1].ident.tag.?);
     try testing.expectEqual(11, decls[1].ident.start);
     try testing.expectEqual(21, decls[1].ident.end);
 }
