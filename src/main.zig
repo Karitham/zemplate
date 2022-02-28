@@ -54,6 +54,15 @@ pub const Template = struct {
 
                         last_off.* = decl.decls[decl.decls.len - 1].end.end;
                     },
+                    parser.Decl.cond => {
+                        try writer.writeAll(text[last_off.*..decl.decls[0].cond.start]);
+                        last_off.* = decl.decls[0].cond.end;
+
+                        if (@field(args, decl.decls[0].cond.tag.?))
+                            inline for (decl.decls[1..]) |d| try renderDecl(writer, args, d, last_off, text);
+
+                        last_off.* = decl.decls[decl.decls.len - 1].end.end;
+                    },
                     else => {},
                 }
             },
@@ -111,6 +120,24 @@ test "render range" {
             \\- c
             \\
         , out.items);
+    }
+}
+
+test "render if" {
+    var out = std.ArrayList(u8).init(std.testing.allocator);
+    defer out.deinit();
+
+    {
+        defer out.clearRetainingCapacity();
+        comptime var t = try Template.new("{{ if .foo }}{{ .bar }}{{ end }}");
+        try t.render(out.writer(), .{ .foo = true, .bar = "bar123" });
+        try utils.expectString("bar123", out.items);
+    }
+    {
+        defer out.clearRetainingCapacity();
+        comptime var t = try Template.new("{{ if .foo }}{{ .bar }}{{ end }}");
+        try t.render(out.writer(), .{ .foo = false, .bar = "bar123" });
+        try utils.expectString("", out.items);
     }
 }
 

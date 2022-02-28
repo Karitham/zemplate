@@ -19,6 +19,9 @@ pub const Token = union(enum) {
     /// range_keyword keyword
     range_keyword: usize,
 
+    /// if_keyword keyword
+    if_keyword: usize,
+
     /// end_keyword keyword
     end_keyword: usize,
 };
@@ -38,7 +41,7 @@ pub const Parser = struct {
                     '{' => if (self.text.len > i + 1 and self.text[i + 1] == '{') Token{ .open_brace = i } else null,
                     '}' => if (self.text.len > i + 1 and self.text[i + 1] == '}') Token{ .close_brace = i + 2 } else null, // see Token.close_brace
                     '.' => switch (tokens[tokens.len - 1]) {
-                        Token.open_brace, Token.range_keyword => x: {
+                        Token.open_brace, Token.range_keyword, Token.if_keyword => x: {
                             i += 1; // skip the dot
 
                             while (i < self.text.len and self.text[i] == ' ') : (i += 1) {} // eat whitespace
@@ -68,6 +71,13 @@ pub const Parser = struct {
                         Token{ .end_keyword = i }
                     else
                         null,
+                    'i' => if (tokens[tokens.len - 1] == Token.open_brace and
+                        self.text.len > i + 2 and
+                        std.mem.eql(u8, self.text[i .. i + 2], "if"))
+                        //
+                        Token{ .if_keyword = i }
+                    else
+                        null,
                     else => null,
                 };
 
@@ -87,6 +97,7 @@ pub const Parser = struct {
         /// possible ops
         end: Block,
         range: Block,
+        cond: Block,
         ident: Block,
 
         // alias
@@ -103,21 +114,53 @@ pub const Parser = struct {
                         Token.close_brace => Tupl.init(null, 2), // empty block
                         Token.ident => Decl.parseIdent(toks, text),
                         Token.range_keyword => Decl.parseRange(toks, text),
+                        Token.if_keyword => Decl.parseCond(toks, text),
                         Token.end_keyword => Decl.parseEnd(toks),
-                        else => Error.expected_ident,
+                        else => ParsingError.expected_ident,
                     };
                 },
                 else => {},
             }
-            return Error.expected_open_bracece;
+            return ParsingError.expected_open_brace;
+        }
+
+        fn parseCond(comptime toks: []const Token, text: []const u8) !Tupl {
+            if (toks.len < 3) return ParsingError.expected_if_keyword;
+            if (toks[0] != Token.open_brace) return ParsingError.expected_open_brace;
+            if (toks[1] != Token.if_keyword) return ParsingError.expected_if_keyword;
+            if (toks[2] != Token.ident) return ParsingError.expected_ident;
+            if (toks[3] != Token.close_brace) return ParsingError.expected_close_brace;
+
+            var decls: []const Decl = ([_]Decl{
+                Decl{
+                    .cond = .{
+                        .start = toks[0].open_brace,
+                        .tag = text[toks[2].ident.start..toks[2].ident.end],
+                        .end = toks[3].close_brace,
+                    },
+                },
+            })[0..]; // I hate this, but I'm not familar enough with the syntax to do it better
+
+            var i: usize = 4;
+            while (i < toks.len) {
+                const d = try Decl.parse(toks[i..], text);
+                i += d.get(1);
+
+                if (d.get(0)) |decl| {
+                    decls = decls ++ [_]Decl{decl};
+                    if (decl == Decl.end) break;
+                }
+            }
+
+            return Tupl.init(Decl{ .decls = decls }, i);
         }
 
         /// parses an identifier
-        fn parseIdent(toks: []const Token, text: []const u8) !Tupl {
-            if (toks.len < 3) return Error.expected_ident;
-            if (toks[0] != Token.open_brace) return Error.expected_ident;
-            if (toks[1] != Token.ident) return Error.expected_ident;
-            if (toks[2] != Token.close_brace) return Error.expected_ident;
+        fn parseIdent(comptime toks: []const Token, text: []const u8) !Tupl {
+            if (toks.len < 3) return ParsingError.expected_ident;
+            if (toks[0] != Token.open_brace) return ParsingError.expected_ident;
+            if (toks[1] != Token.ident) return ParsingError.expected_ident;
+            if (toks[2] != Token.close_brace) return ParsingError.expected_ident;
 
             var range: Block = .{
                 .start = toks[0].open_brace,
@@ -131,22 +174,22 @@ pub const Parser = struct {
         }
 
         /// parses the end_keyword keyword with its braces
-        fn parseEnd(toks: []const Token) !Tupl {
-            if (toks.len < 3) return Error.expected_end_keyword;
-            if (toks[0] != Token.open_brace) return Error.expected_end_keyword;
-            if (toks[1] != Token.end_keyword) return Error.expected_end_keyword;
-            if (toks[2] != Token.close_brace) return Error.expected_end_keyword;
+        fn parseEnd(comptime toks: []const Token) !Tupl {
+            if (toks.len < 3) return ParsingError.expected_end_keyword;
+            if (toks[0] != Token.open_brace) return ParsingError.expected_end_keyword;
+            if (toks[1] != Token.end_keyword) return ParsingError.expected_end_keyword;
+            if (toks[2] != Token.close_brace) return ParsingError.expected_end_keyword;
 
             return Tupl.init(Decl{ .end = .{ .start = toks[0].open_brace, .end = toks[2].close_brace } }, 3);
         }
 
         /// parses a range_keyword
         fn parseRange(comptime toks: []const Token, text: []const u8) !Tupl {
-            if (toks.len < 3) return Error.expected_range_keyword;
-            if (toks[0] != Token.open_brace) return Error.open_brace;
-            if (toks[1] != Token.range_keyword) return Error.expected_range_keyword;
-            if (toks[2] != Token.ident) return Error.expected_ident;
-            if (toks[3] != Token.close_brace) return Error.expected_close_brace;
+            if (toks.len < 3) return ParsingError.expected_range_keyword;
+            if (toks[0] != Token.open_brace) return ParsingError.open_brace;
+            if (toks[1] != Token.range_keyword) return ParsingError.expected_range_keyword;
+            if (toks[2] != Token.ident) return ParsingError.expected_ident;
+            if (toks[3] != Token.close_brace) return ParsingError.expected_close_brace;
 
             var decls: []const Decl = ([_]Decl{
                 Decl{
@@ -159,15 +202,13 @@ pub const Parser = struct {
             })[0..]; // I hate this, but I'm not familar enough with the syntax to do it better
 
             var i: usize = 4;
-            comptime {
-                while (i < toks.len) {
-                    const d = try Decl.parse(toks[i..], text);
-                    i += d.get(1);
+            while (i < toks.len) {
+                const d = try Decl.parse(toks[i..], text);
+                i += d.get(1);
 
-                    if (d.get(0)) |decl| {
-                        decls = decls ++ [_]Decl{decl};
-                        if (decl == Decl.end) break;
-                    }
+                if (d.get(0)) |decl| {
+                    decls = decls ++ [_]Decl{decl};
+                    if (decl == Decl.end) break;
                 }
             }
 
@@ -210,10 +251,11 @@ pub const Parser = struct {
 
     /// Errors met while parsing
     /// TODO: Find a good way to report errors such that we give file position to the user
-    pub const Error = error{
-        expected_close_bracece,
-        expected_open_bracece,
+    pub const ParsingError = error{
+        expected_close_brace,
+        expected_open_brace,
         expected_ident,
+        expected_if_keyword,
         expected_end_keyword,
         expected_range_keyword,
         unknown,
@@ -294,6 +336,21 @@ test "parse range" {
         try testing.expectEqual(err, Parser.Error.expected_end_keyword);
 }
 
+test "parse cond" {
+    comptime var decls = try Parser.new("{{ if .foo }} {{ .bar }} {{ end }}").parse();
+    try testing.expectEqual(decls.len, 1);
+
+    const if_decl = decls[0];
+    try utils.expectString("foo", if_decl.decls[0].cond.tag.?);
+    try testing.expectEqual(0, if_decl.decls[0].cond.start);
+    try testing.expectEqual(13, if_decl.decls[0].cond.end);
+    try utils.expectString("bar", if_decl.decls[1].ident.tag.?);
+    try testing.expectEqual(14, if_decl.decls[1].ident.start);
+    try testing.expectEqual(24, if_decl.decls[1].ident.end);
+    try testing.expectEqual(25, if_decl.decls[2].end.start);
+    try testing.expectEqual(34, if_decl.decls[2].end.end);
+}
+
 test "parse idents" {
     comptime var decls = try Parser.new("").parse();
     try testing.expectEqual(0, decls.len);
@@ -364,4 +421,19 @@ test "tokenize range_keyword" {
     try testing.expectEqual(Token{ .open_brace = 28 }, tokens[7]);
     try testing.expectEqual(Token{ .end_keyword = 31 }, tokens[8]);
     try testing.expectEqual(Token{ .close_brace = 37 }, tokens[9]);
+}
+
+test "tokenize if_keyword" {
+    comptime var tokens = try Parser.new("{{ if .foo }} {{ .bar }} {{ end }}").tokenize();
+    try testing.expectEqual(10, tokens.len);
+    try testing.expectEqual(Token{ .open_brace = 0 }, tokens[0]);
+    try testing.expectEqual(Token{ .if_keyword = 3 }, tokens[1]);
+    try testing.expectEqual(Token{ .ident = .{ .start = 7, .end = 10 } }, tokens[2]);
+    try testing.expectEqual(Token{ .close_brace = 13 }, tokens[3]);
+    try testing.expectEqual(Token{ .open_brace = 14 }, tokens[4]);
+    try testing.expectEqual(Token{ .ident = .{ .start = 18, .end = 21 } }, tokens[5]);
+    try testing.expectEqual(Token{ .close_brace = 24 }, tokens[6]);
+    try testing.expectEqual(Token{ .open_brace = 25 }, tokens[7]);
+    try testing.expectEqual(Token{ .end_keyword = 28 }, tokens[8]);
+    try testing.expectEqual(Token{ .close_brace = 34 }, tokens[9]);
 }

@@ -36,6 +36,18 @@ if `foo` is `{"foo": [{ "bar": "a" }, { "bar": "b" }, { "bar": "c" }]}` then the
 
 ```
 
+### Conditionals
+
+```txt
+{{ if .foo }}{{ .bar }}{{ end }}
+```
+
+if `foo` is `{"foo": true, "bar": "hello world!"}` then the output would be
+
+```text
+hello world!
+```
+
 ## Notes
 
 I'm open to any and all contributions, be it from code-review, documentation or any form of critique, especially since this is my first zig project.
