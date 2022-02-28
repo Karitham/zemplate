@@ -20,6 +20,8 @@ if `foo` is `{ "foo": "bar" }` the output would be
 bar
 ```
 
+It also works with nested identifiers, `{{.foo.bar}}` with `{ "foo": { "bar": "baz" } }` would output `baz`.
+
 ### Ranges
 
 ```txt
@@ -44,7 +46,7 @@ if `foo` is `{"foo": [{ "bar": "a" }, { "bar": "b" }, { "bar": "c" }]}` then the
 
 if `foo` is `{"foo": true, "bar": "hello world!"}` then the output would be
 
-```text
+```txt
 hello world!
 ```
 

@@ -166,7 +166,7 @@ test "render idents" {
     {
         defer out.clearRetainingCapacity();
         comptime var t = try Template.new("{{ .foo.bar }}");
-        try t.render(out.writer(), .{ .foo = .{ .bar = "potat" } });
-        try utils.expectString(out.items, "potat");
+        try t.render(out.writer(), .{ .foo = .{ .bar = "baz" } });
+        try utils.expectString(out.items, "baz");
     }
 }
