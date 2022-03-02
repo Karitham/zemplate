@@ -74,3 +74,46 @@ test "parse tag" {
     var t2 = comptime try getField([]const []const u8, .{ .foo = &.{ "bar", "baz" } }, "foo");
     try testing.expectEqualSlices([]const u8, t2, &.{ "bar", "baz" });
 }
+
+/// returns the index to the line
+pub fn indexToLineStack(index: usize, text: []const u8) Tuple(usize, usize) {
+    var y: usize = 1;
+    var since_new_line: usize = 1;
+
+    for (text) |c, i| {
+        if (c == '\n') {
+            y += 1;
+            since_new_line = 0;
+        }
+
+        if (i == index) return Tuple(usize, usize).init(y, since_new_line);
+
+        since_new_line += 1;
+    }
+
+    return Tuple(usize, usize).init(0, 0);
+}
+
+pub fn getLine(line_number: usize, text: []const u8) []const u8 {
+    var y: usize = 1;
+    var x: usize = 0;
+    var line_start: usize = 0;
+
+    while (y <= line_number and x < text.len) : (x += 1) {
+        if (text[x] == '\n') y += 1;
+        if (y == line_number and text[x] == '\n') line_start = if (y > 1) x + 1 else x;
+    }
+
+    return text[line_start .. x - 1];
+}
+
+test "getLine" {
+    const text = "foo\nbar\nbaz\n";
+    const line = getLine(2, text);
+    try testing.expectEqualSlices(u8, "bar", line);
+}
+
+test "indexToLineStack" {
+    const t = indexToLineStack(8, "foo\nbar\nbaz");
+    try testing.expectEqual(Tuple(usize, usize).init(3, 1), t);
+}

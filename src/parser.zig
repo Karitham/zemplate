@@ -24,6 +24,17 @@ pub const Token = union(enum) {
 
     /// end_keyword keyword
     end_keyword: usize,
+
+    fn start(self: Token) usize {
+        return switch (self) {
+            .open_brace => self.open_brace,
+            .close_brace => self.close_brace,
+            .ident => self.ident.start,
+            .range_keyword => self.range_keyword,
+            .if_keyword => self.if_keyword,
+            .end_keyword => self.end_keyword,
+        };
+    }
 };
 
 pub const Parser = struct {
@@ -115,7 +126,7 @@ pub const Parser = struct {
                         Token.ident => Decl.parseIdent(toks, text),
                         Token.range_keyword => Decl.parseRange(toks, text),
                         Token.if_keyword => Decl.parseCond(toks, text),
-                        Token.end_keyword => Decl.parseEnd(toks),
+                        Token.end_keyword => Decl.parseEnd(toks, text),
                         else => ParsingError.expected_ident,
                     };
                 },
@@ -125,11 +136,11 @@ pub const Parser = struct {
         }
 
         fn parseCond(comptime toks: []const Token, text: []const u8) !Tupl {
-            if (toks.len < 3) return ParsingError.expected_if_keyword;
-            if (toks[0] != Token.open_brace) return ParsingError.expected_open_brace;
-            if (toks[1] != Token.if_keyword) return ParsingError.expected_if_keyword;
-            if (toks[2] != Token.ident) return ParsingError.expected_ident;
-            if (toks[3] != Token.close_brace) return ParsingError.expected_close_brace;
+            if (toks.len < 4) parseError("'{s}': expected matching braces, ident & keywords (line:index) :{}:{}", toks[0].start(), text);
+            if (toks[0] != Token.open_brace) parseError("'{s}': expected open brace (line:index) :{}:{}", toks[0].start(), text);
+            if (toks[1] != Token.if_keyword) parseError("'{s}': expected if keyword (line:index) :{}:{}", toks[1].start(), text);
+            if (toks[2] != Token.ident) parseError("'{s}': expected ident (line:index) :{}:{}", toks[2].start(), text);
+            if (toks[3] != Token.close_brace) parseError("'{s}': expected close brace (line:index) :{}:{}", toks[2].start(), text);
 
             var decls: []const Decl = ([_]Decl{
                 Decl{
@@ -157,10 +168,10 @@ pub const Parser = struct {
 
         /// parses an identifier
         fn parseIdent(comptime toks: []const Token, text: []const u8) !Tupl {
-            if (toks.len < 3) return ParsingError.expected_ident;
-            if (toks[0] != Token.open_brace) return ParsingError.expected_ident;
-            if (toks[1] != Token.ident) return ParsingError.expected_ident;
-            if (toks[2] != Token.close_brace) return ParsingError.expected_ident;
+            if (toks.len < 3) parseError("'{s}': expected matching braces & keyword (line:index) :{}:{}", toks[0].start(), text);
+            if (toks[0] != Token.open_brace) parseError("'{s}': expected open brace (line:index) :{}:{}", toks[0].start(), text);
+            if (toks[1] != Token.ident) parseError("'{s}': expected ident (line:index) :{}:{}", toks[1].start(), text);
+            if (toks[2] != Token.close_brace) parseError("'{s}': expected close brace (line:index) :{}:{}", toks[2].start(), text);
 
             var range: Block = .{
                 .start = toks[0].open_brace,
@@ -174,22 +185,22 @@ pub const Parser = struct {
         }
 
         /// parses the end_keyword keyword with its braces
-        fn parseEnd(comptime toks: []const Token) !Tupl {
-            if (toks.len < 3) return ParsingError.expected_end_keyword;
-            if (toks[0] != Token.open_brace) return ParsingError.expected_end_keyword;
-            if (toks[1] != Token.end_keyword) return ParsingError.expected_end_keyword;
-            if (toks[2] != Token.close_brace) return ParsingError.expected_end_keyword;
+        fn parseEnd(comptime toks: []const Token, text: []const u8) !Tupl {
+            if (toks.len < 3) parseError("'{s}': expected matching braces & keyword (line:index) :{}:{}", toks[0].start(), text);
+            if (toks[0] != Token.open_brace) parseError("'{s}': expected open brace (line:index) :{}:{}", toks[0].start(), text);
+            if (toks[1] != Token.end_keyword) parseError("'{s}': expected end keyword (line:index) :{}:{}", toks[1].start(), text);
+            if (toks[2] != Token.close_brace) parseError("'{s}': expected close brace (line:index) :{}:{}", toks[2].start(), text);
 
             return Tupl.init(Decl{ .end = .{ .start = toks[0].open_brace, .end = toks[2].close_brace } }, 3);
         }
 
         /// parses a range_keyword
         fn parseRange(comptime toks: []const Token, text: []const u8) !Tupl {
-            if (toks.len < 3) return ParsingError.expected_range_keyword;
-            if (toks[0] != Token.open_brace) return ParsingError.open_brace;
-            if (toks[1] != Token.range_keyword) return ParsingError.expected_range_keyword;
-            if (toks[2] != Token.ident) return ParsingError.expected_ident;
-            if (toks[3] != Token.close_brace) return ParsingError.expected_close_brace;
+            if (toks.len < 4) parseError("'{s}': expected matching braces, ident & keywords (line:index) :{}:{}", toks[0].start(), text);
+            if (toks[0] != Token.open_brace) parseError("'{s}': expected open brace (line:index) :{}:{}", toks[0].start(), text);
+            if (toks[1] != Token.range_keyword) parseError("'{s}': expected range keyword (line:index) :{}:{}", toks[1].start(), text);
+            if (toks[2] != Token.ident) parseError("'{s}': expected ident (line:index) :{}:{}", toks[2].start(), text);
+            if (toks[3] != Token.close_brace) parseError("'{s}': expected close brace (line:index) :{}:{}", toks[2].start(), text);
 
             var decls: []const Decl = ([_]Decl{
                 Decl{
@@ -233,6 +244,13 @@ pub const Parser = struct {
                 Decl.ident => self.ident.end,
                 Decl.decls => if (self.decls.len > 0) self.decls[self.decls.len - 1].range.end else or_,
             };
+        }
+
+        fn parseError(comptime format: []const u8, index: usize, text: []const u8) void {
+            const idx = utils.indexToLineStack(index, text);
+            const line = utils.getLine(idx.get(1), text);
+            const buf = std.fmt.comptimePrint(format, .{ line, idx.get(0), idx.get(1) });
+            @compileError(buf);
         }
     };
 
@@ -436,4 +454,10 @@ test "tokenize if_keyword" {
     try testing.expectEqual(Token{ .open_brace = 25 }, tokens[7]);
     try testing.expectEqual(Token{ .end_keyword = 28 }, tokens[8]);
     try testing.expectEqual(Token{ .close_brace = 34 }, tokens[9]);
+}
+
+// This tests compile error messages.
+// uncomment to see
+test "error handling" {
+    // _ = comptime try Parser.new("{{ if  }}").parse();
 }
